@@ -38,6 +38,9 @@ day26-mcp/
 
 ## Quick start
 
+Windows / PowerShell: xem [SETUP-WINDOWS.md](SETUP-WINDOWS.md) để dùng Python 3.12,
+môi trường riêng và script chạy Lab 04.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt

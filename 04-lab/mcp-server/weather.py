@@ -1,12 +1,20 @@
 from typing import Any
-import asyncio
+import argparse
+import logging
+from pathlib import Path
 import httpx
 import os
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+
+load_dotenv(Path(__file__).with_name(".env"))
+logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 port = int(os.getenv("PORT", 8085))
 mcp = FastMCP("weather", host="0.0.0.0", port=port)
+# Apply this on import too: callers may use the tools without running __main__.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Constants
 WEATHERAPI_BASE = "https://api.weatherapi.com/v1"
@@ -15,35 +23,35 @@ USER_AGENT = "weather-app/1.0"
 # Get API key from environment variable
 API_KEY = os.getenv("WEATHERAPI_KEY")
 
-async def make_weather_request(endpoint: str, params: dict[str, str]) -> dict[str, Any] | None:
+async def make_weather_request(endpoint: str, params: dict[str, str]) -> dict[str, Any]:
     """Make a request to the WeatherAPI with proper error handling."""
     # Check if API key is set
     if not API_KEY:
-        print("ERROR: WeatherAPI key not set. Please set WEATHERAPI_KEY environment variable.")
-        return None
+        raise RuntimeError("WeatherAPI key not configured. Set WEATHERAPI_KEY in mcp-server/.env.")
         
     headers = {
         "User-Agent": USER_AGENT,
     }
     # Add API key to parameters
-    params["key"] = API_KEY
+    request_params = {**params, "key": API_KEY}
     
     url = f"{WEATHERAPI_BASE}/{endpoint}"
     
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(url, headers=headers, params=params, timeout=30.0)
+            response = await client.get(url, headers=headers, params=request_params, timeout=30.0)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            print(f"HTTP Error {e.response.status_code}: {e.response.text}")
-            return None
+            # Do not log the request URL: its query string contains the API key.
+            status = e.response.status_code
+            logger.warning("WeatherAPI returned HTTP %s", status)
+            raise RuntimeError(f"WeatherAPI returned HTTP {status}. Check the city, API key and plan.") from None
         except httpx.RequestError as e:
-            print(f"Request Error: {e}")
-            return None
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            return None
+            logger.warning("WeatherAPI connection failed (%s)", type(e).__name__)
+            raise RuntimeError("Cannot connect to WeatherAPI. Check the network and try again.") from None
+        except ValueError:
+            raise RuntimeError("WeatherAPI returned an invalid JSON response.") from None
 
 @mcp.tool()
 async def get_current_weather(city: str) -> str:
@@ -58,11 +66,6 @@ async def get_current_weather(city: str) -> str:
     }
     
     data = await make_weather_request("current.json", params)
-
-    if not data:
-        if not API_KEY:
-            return f"❌ WeatherAPI key not configured. Please set WEATHERAPI_KEY environment variable with your API key from weatherapi.com"
-        return f"Unable to fetch current weather data for {city}. Please check the city name and API key configuration."
 
     current = data["current"]
     location = data["location"]
@@ -88,10 +91,10 @@ async def get_forecast(city: str, days: int = 3) -> str:
 
     Args:
         city: City name (e.g., "Hanoi", "Haiphong", "Danang", "Brisbane", "Sydney", "Melbourne")
-        days: Number of days to forecast (1-3 for free tier, max 10 for paid)
+        days: Number of days to forecast, from 1 to 3.
     """
-    # Limit days to 3 for free tier
-    days = min(days, 3)
+    if not 1 <= days <= 3:
+        raise ValueError("days must be between 1 and 3.")
     
     params = {
         "q": city,
@@ -101,11 +104,6 @@ async def get_forecast(city: str, days: int = 3) -> str:
     }
     
     data = await make_weather_request("forecast.json", params)
-
-    if not data:
-        if not API_KEY:
-            return f"❌ WeatherAPI key not configured. Please set WEATHERAPI_KEY environment variable with your API key from weatherapi.com"
-        return f"Unable to fetch forecast data for {city}. Please check the city name and API key configuration."
 
     location = data["location"]
     forecast_days = data["forecast"]["forecastday"]
@@ -135,18 +133,10 @@ async def health_check() -> str:
     """Health check endpoint for deployment verification."""
     return "✅ Weather MCP Server is running! Ready to provide weather data for Australian cities and worldwide."
 
-print("✅ MCP server initialized with Streamable HTTP transport")
-print("🔧 Available tools: get_current_weather, get_forecast, health_check")
-
 if __name__ == "__main__":
-    import sys
-    
-    is_cloud_run = bool(os.getenv("PORT"))
-    is_standalone = len(sys.argv) == 1 and sys.stdin.isatty()
-    
-    if is_cloud_run or is_standalone:
-        print(f"🚀 Starting MCP server on http://0.0.0.0:{port}/mcp")
-        mcp.run(transport="streamable-http")
-    else:
-        print("Starting FastMCP server in stdio mode for local client", file=sys.stderr)
-        mcp.run()
+    parser = argparse.ArgumentParser(description="Weather MCP server")
+    parser.add_argument("--transport", choices=["streamable-http", "stdio"], default="streamable-http")
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Starting Weather MCP server (%s), port %s", args.transport, port)
+    mcp.run(transport=args.transport)

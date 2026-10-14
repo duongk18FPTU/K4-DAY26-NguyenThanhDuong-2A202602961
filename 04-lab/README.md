@@ -33,7 +33,7 @@ ADK (Agent Development Kit) đóng vai trò **MCP Client**
 │     → nhận về: get_current_weather, get_forecast, health_check  │
 │                                                                 │
 │  3. TRUYỀN tools cho LLM (Gemini)                               │
-│     Agent(model="gemini-2.5-flash", tools=[weather_tools])      │
+│     Agent(model=GEMINI_MODEL, tools=[weather_tools])             │
 │     → Gemini biết nó có thể gọi 3 tools trên                    │
 │                                                                 │
 │  4. ĐIỀU PHỐI vòng lặp Function Calling                         │
@@ -50,14 +50,20 @@ So với bài 02 (viết client thủ công bằng `mcp.ClientSession`), ADK gi�
 
 ## Setup
 
+Windows / PowerShell: see [SETUP-WINDOWS.md](../SETUP-WINDOWS.md).
+The agent defaults to `gemini-3.5-flash-lite`; set `GEMINI_MODEL` in
+`mcp-client/.env` to use another model available to your API key.
+Google currently restricts Gemini 2.5 access for new users;
+see [Google's model availability notes](https://ai.google.dev/gemini-api/docs/deprecations/).
+
 ### 1. MCP Server
 
 ```bash
 cd mcp-server
 uv sync
 
-# Set your WeatherAPI key (get one free at https://weatherapi.com)
-export WEATHERAPI_KEY="your_weatherapi_key"
+# Copy .env.example to .env if .env does not already exist,
+# then fill in WEATHERAPI_KEY (get one at https://weatherapi.com).
 
 # Start the server (runs on port 8085 by default)
 uv run python weather.py
@@ -71,8 +77,8 @@ The server will be available at `http://localhost:8085/mcp`.
 cd mcp-client
 uv sync
 
-# Create .env file with your Gemini API key
-echo "GOOGLE_API_KEY=your_gemini_api_key" > .env
+# Copy .env.example to .env if .env does not already exist,
+# then fill in GOOGLE_API_KEY with your Gemini API key.
 
 # Start ADK web interface
 uv run adk web
@@ -88,3 +94,20 @@ Open http://localhost:8000 in your browser, select `weather_agent`, and ask abou
 | `GOOGLE_API_KEY` | mcp-client/.env | Gemini API key |
 | `PORT` | mcp-server (env) | Override server port (default: 8085) |
 | `MCP_SERVER_URL` | mcp-client/.env | MCP endpoint the agent connects to (default: `http://localhost:8085/mcp`; set to your Cloud Run URL + `/mcp` when deployed) |
+| `GEMINI_MODEL` | mcp-client/.env | Gemini model (default: `gemini-3.5-flash-lite`) |
+
+## Verify the lab
+
+With the MCP server running, from `mcp-client`:
+
+```bash
+uv run python verify_setup.py
+uv run python verify_setup.py --live
+```
+
+The first command verifies configuration, the MCP handshake, the three tools,
+health, and ADK discovery. `--live` also calls WeatherAPI and Gemini, verifies
+both weather tools are selected by Gemini, and prints the final agent answer.
+Live checks use API quota. Forecast requests must have `days` between 1 and 3.
+The server defaults to HTTP; use `python weather.py --transport stdio` when
+explicitly connecting through stdio.

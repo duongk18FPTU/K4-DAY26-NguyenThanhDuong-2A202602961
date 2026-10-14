@@ -36,6 +36,8 @@ AI agent built with **Google Agent Development Kit (ADK)** that uses tools from 
 
 ## Quick Start
 
+For Windows / PowerShell, see [SETUP-WINDOWS.md](../../SETUP-WINDOWS.md).
+
 ### 1. Start the MCP Server
 
 ```bash
@@ -49,9 +51,8 @@ uv run python weather.py
 ```bash
 cd mcp-client
 
-# Create .env file with your Google API key
+# Fill GOOGLE_API_KEY in .env (copy .env.example only if .env does not exist).
 # Get free key from: https://aistudio.google.com/apikey
-echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
 ```
 
 ### 3. Install Dependencies
@@ -103,7 +104,7 @@ connection_params = StreamableHTTPConnectionParams(
 
 root_agent = Agent(
     name="weather_agent",
-    model="gemini-2.5-flash",
+    model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
     tools=[weather_tools],
 )
 ```
@@ -112,28 +113,46 @@ root_agent = Agent(
 
 ### Agent won't connect to MCP server
 
-1. **404 errors**: MCP server is not running or wrong port
+1. **404 errors from MCP**: Wrong MCP endpoint or port
    - Ensure the MCP server is running on port 8085
    - Check `MCP_SERVER_URL` (env var / `.env`, default `http://localhost:8085/mcp`)
 
-2. **405 errors**: Port conflict with another application
-   - Check what's running on the port: `lsof -i :8085`
-   - Change port in both server and client if needed
+2. **400/405/406 from a plain browser GET**: This does not validate MCP.
+   - Run `uv run python verify_setup.py` to perform the actual MCP handshake.
 
 3. **Timeout errors**: Server not started
    - Start the MCP server first, then the ADK client
 
-### Fallback Mode
+### Gemini model errors
 
-If MCP connection fails, the agent runs in fallback mode without tools.
-Fix the connection and restart ADK web.
+- Gemini 404 for `gemini-2.5-flash`: use `GEMINI_MODEL=gemini-3.5-flash-lite`.
+  [Google restricts Gemini 2.5 access for new users](https://ai.google.dev/gemini-api/docs/deprecations/).
+- Gemini 503: temporary model capacity issue; try again later or configure
+  another available model in `GEMINI_MODEL`, then restart ADK web.
+- Gemini 429: check the quota and rate limits of the API key's project.
+
+The agent keeps its MCP toolset; connection failures are reported instead of
+creating a tool-free agent that could invent weather data.
 
 ## Environment Variables
 
 Create `.env` file:
 ```bash
 GOOGLE_API_KEY=your_gemini_api_key
+GOOGLE_GENAI_USE_VERTEXAI=FALSE
+MCP_SERVER_URL=http://localhost:8085/mcp
+GEMINI_MODEL=gemini-3.5-flash-lite
 ```
+
+## Verification
+
+```bash
+uv run python verify_setup.py
+uv run python verify_setup.py --live
+```
+
+`--live` exercises real WeatherAPI data and the Gemini tool-calling loop;
+it uses API quota and prints the final Vietnamese answer.
 
 ## Resources
 
